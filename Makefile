@@ -30,6 +30,11 @@ ifeq "$(build)" "debug"
 else ifeq "$(build)" "sanitize"
   CFLAGS += -pipe -g -fsanitize=address -fno-omit-frame-pointer
   LDFLAGS += -fsanitize=address
+else ifeq "${build}" "fuzz"
+  # Sanitizers are better with clang
+  CC = clang
+  CFLAGS += -g -fsanitize=address -fsanitize-coverage=trace-pc-guard
+  LDFLAGS += -fsanitize=address
 else
   CFLAGS += -Os
   LDFLAGS += -Wl,-s
