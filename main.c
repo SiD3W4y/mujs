@@ -372,7 +372,21 @@ void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
 // END FUZZING CODE
 //
 
-js_State* js_clean_state(int flags)
+static void jsB_fuzzilli(js_State* J)
+{
+    const char* cmd = js_tostring(J, 1);
+    const int code = js_tonumber(J, 2);
+
+    if (strcmp(cmd, "FUZZILLI_CRASH") == 0)
+    {
+        if (code == 0 || code == 1)
+            *(int*)0x41414141 = 0x1337;
+    }
+
+    js_pushundefined(J);
+}
+
+static js_State* js_clean_state(int flags)
 {
     js_State* J = js_newstate(NULL, NULL, flags);
 
@@ -408,6 +422,7 @@ js_State* js_clean_state(int flags)
 
     return J;
 }
+
 
 int main(int argc, char **argv)
 {
@@ -448,6 +463,8 @@ int main(int argc, char **argv)
         while (reprl_mode)
         {
             js_State* engine = js_clean_state(strict ? JS_STRICT : 0);
+            js_newcfunction(engine, jsB_fuzzilli, "fuzzilli", 2);
+            js_setglobal(engine, "fuzzilli");
 
 			unsigned int action = 0;
 			size_t script_size;
