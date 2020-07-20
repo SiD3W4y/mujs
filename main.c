@@ -434,7 +434,7 @@ int main(int argc, char **argv)
     int fuzzilli_reprl = 0;
     int i, c;
 
-    while ((c = xgetopt(argc, argv, "is")) != -1) {
+    while ((c = xgetopt(argc, argv, "isf")) != -1) {
         switch (c) {
             default: usage(); break;
             case 'i': interactive = 1; break;

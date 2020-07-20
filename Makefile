@@ -33,8 +33,8 @@ else ifeq "$(build)" "sanitize"
 else ifeq "${build}" "fuzz"
   # Sanitizers are better with clang
   CC = clang
-  CFLAGS += -g -fsanitize=address -fsanitize-coverage=trace-pc-guard
-  LDFLAGS += -fsanitize=address
+  CFLAGS += -g -fsanitize=undefined -fsanitize-coverage=trace-pc-guard
+  LDFLAGS += -fsanitize=undefined
 else
   CFLAGS += -Os
   LDFLAGS += -Wl,-s
