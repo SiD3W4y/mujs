@@ -277,6 +277,7 @@ static void usage(void)
 {
     fprintf(stderr, "Usage: mujs [options] [script [scriptArgs*]]\n");
     fprintf(stderr, "\t-i: Enter interactive prompt after running code.\n");
+    fprintf(stderr, "\t-f: Fuzzilli reprl mode.\n");
     fprintf(stderr, "\t-s: Check strictness.\n");
     exit(1);
 }
@@ -286,10 +287,12 @@ static void usage(void)
 // BEGIN FUZZING CODE
 //
 
-#include <stdint.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h>
+#include <unistd.h>
+#include <stdint.h>
 
 #define REPRL_CRFD 100
 #define REPRL_CWFD 101
@@ -369,25 +372,9 @@ void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
 // END FUZZING CODE
 //
 
-    int
-main(int argc, char **argv)
+js_State* js_clean_state(int flags)
 {
-    char *input;
-    js_State *J;
-    int status = 0;
-    int strict = 0;
-    int interactive = 0;
-    int i, c;
-
-    while ((c = xgetopt(argc, argv, "is")) != -1) {
-        switch (c) {
-            default: usage(); break;
-            case 'i': interactive = 1; break;
-            case 's': strict = 1; break;
-        }
-    }
-
-    J = js_newstate(NULL, NULL, strict ? JS_STRICT : 0);
+    js_State* J = js_newstate(NULL, NULL, flags);
 
     js_newcfunction(J, jsB_gc, "gc", 0);
     js_setglobal(J, "gc");
@@ -418,6 +405,124 @@ main(int argc, char **argv)
 
     js_dostring(J, require_js);
     js_dostring(J, stacktrace_js);
+
+    return J;
+}
+
+int main(int argc, char **argv)
+{
+    char *input;
+    js_State *J;
+    int status = 0;
+    int strict = 0;
+    int interactive = 0;
+    int fuzzilli_reprl = 0;
+    int i, c;
+
+    while ((c = xgetopt(argc, argv, "is")) != -1) {
+        switch (c) {
+            default: usage(); break;
+            case 'i': interactive = 1; break;
+            case 's': strict = 1; break;
+            case 'f': fuzzilli_reprl = 1; break;
+        }
+    }
+
+    // BEGIN FUZZILLI CODE
+    // Code mostly copy pasted from duktape/examples/cmdline/duk_cmdline.c
+    if (fuzzilli_reprl)
+    {
+        int reprl_mode = 1;
+        char helo[4] = "HELO";
+
+        if (write(REPRL_CWFD, helo, 4) != 4 ||
+            read(REPRL_CRFD, helo, 4) != 4) {
+            reprl_mode = 0;
+        }
+
+        if (memcmp(helo, "HELO", 4) != 0) {
+            fprintf(stderr, "Invalid response from parent\n");
+            return -1;
+        }
+
+        while (reprl_mode)
+        {
+            js_State* engine = js_clean_state(strict ? JS_STRICT : 0);
+
+			unsigned int action = 0;
+			size_t script_size;
+			char static_buff[4096];
+			char *buffer;
+			char *ptr;
+			size_t remaining;
+			int rc;
+
+			int64_t nread = read(REPRL_CRFD, &action, 4);
+
+			if (nread != 4 || action != 0x63657865) { // 'exec' as a u32
+				fprintf(stderr, "Unknown action: %u\n", action);
+				return -1;
+			}
+
+            if (read(REPRL_CRFD, &script_size, 8) != 8)
+            {
+                fprintf(stderr, "EOF while reading script size\n");
+                return -1;
+            }
+
+			/* In practice, we're never going to get to 4k long input scripts (21 core days got to ~80 bytes). */
+			if (script_size > 4095) {
+				buffer = (char *) malloc((sizeof(char) * (script_size + 1)));
+			} else {
+				buffer = static_buff;
+			}
+
+			ptr = buffer;
+			remaining = script_size;
+
+			while (remaining > 0) {
+				int64_t rv = read(REPRL_DRFD, ptr, remaining);
+
+                if (rv < 0)
+                {
+                    fprintf(stderr, "Unexpected EOF while reading script content\n");
+                    return -1;
+                }
+
+				remaining -= rv;
+				ptr += rv;
+			}
+
+			buffer[script_size] = 0;
+
+			/* Actually execute. */
+            rc = js_dostring(engine, buffer);
+
+			/* Return result to parent. */
+			rc <<= 8;
+
+			if (write(REPRL_CWFD, &rc, 4) != 4)
+            {
+                fprintf(stderr, "Error while writing return code to fd\n");
+                return -1;
+            }
+
+			/* Clean up this round. */
+			if (script_size > 4095) {
+				free(buffer);
+			}
+
+            // Cleanup
+            js_gc(engine, 0);
+            js_freestate(engine);
+			__sanitizer_cov_reset_edgeguards();
+        }
+
+        return 0;
+    }
+    // END FUZZILLI CODE
+
+    J = js_clean_state(strict ? JS_STRICT : 0);
 
     if (xoptind == argc) {
         interactive = 1;
